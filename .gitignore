@@ -1,0 +1,10 @@
+# Configuración con claves: se genera al publicar, nunca se sube
+config.js
+.env
+.env.*
+node_modules/
+
+# Material de trabajo de Impeccable
+.impeccable/review/
+.impeccable/mocks/
+.impeccable/questions/

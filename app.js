@@ -1,10 +1,12 @@
-// Maqueta: datos de ejemplo en memoria. Nada se guarda ni se envía a ningún servidor.
-// Con la base de datos real, el PIN de administrador se comprobará en el servidor, nunca aquí.
+// Reserva de sala comunitaria.
+// Con config.js (Supabase) usa la base de datos real; sin él funciona en modo maqueta con datos de ejemplo.
+// Ninguna clave ni PIN real vive en este archivo: la configuración llega en config.js, que no está en git.
 (function () {
   'use strict';
 
-  var DEMO_ADMIN_PIN = '0000'; // solo maqueta
   var DAY = 86400000;
+  var cfg = window.APP_CONFIG || {};
+  var live = !!(cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY && !/TU[-_]/.test(cfg.SUPABASE_URL + cfg.SUPABASE_ANON_KEY));
 
   function startOfDay(d) { var x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
   function at(dayOffset, h, m) {
@@ -14,18 +16,83 @@
     return d;
   }
 
-  var now = new Date();
-  var nextHour = new Date(now); nextHour.setHours(now.getHours() + 1, 0, 0, 0);
-  var nextId = 1;
+  /* ---------- Capa de datos ---------- */
+  var ERRORS = {
+    datos_invalidos: 'Revisa los datos: nombre, horas y un PIN de 4 cifras.',
+    inicio_pasado: 'El inicio ya pasó. Elige una hora a partir de ahora.',
+    solape: 'La sala ya está ocupada en ese horario. He actualizado las reservas.',
+    demasiadas_reservas: 'Ya tienes 5 reservas futuras con ese nombre. Cancela alguna para reservar más.',
+    red: 'No se pudo conectar. Comprueba tu conexión e inténtalo de nuevo.'
+  };
+  var GENERIC_ERROR = 'Ha ocurrido un error. Inténtalo de nuevo.';
 
-  var bookings = [
-    { name: 'Marta', pin: '1234', start: new Date(nextHour.getTime() + 2 * 3600000), end: new Date(nextHour.getTime() + 3.5 * 3600000) },
-    { name: 'Pablo', pin: '1234', start: at(1, 10), end: at(1, 12) },
-    { name: 'Lucía', pin: '1234', start: at(1, 18), end: at(1, 19, 30) },
-    { name: 'Dani', pin: '1234', start: at(2, 22), end: at(3, 1) },
-    { name: 'Marta', pin: '1234', start: at(3, 8), end: at(3, 9) },
-    { name: 'Asociación de vecinos', pin: '1234', start: at(5, 17), end: at(5, 21) }
-  ].map(function (b) { b.id = nextId++; return b; });
+  function makeLiveApi() {
+    var base = cfg.SUPABASE_URL.replace(/\/+$/, '') + '/rest/v1/rpc/';
+    function rpc(fn, args) {
+      return fetch(base + fn, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: cfg.SUPABASE_ANON_KEY,
+          Authorization: 'Bearer ' + cfg.SUPABASE_ANON_KEY
+        },
+        body: JSON.stringify(args || {})
+      }).then(function (res) {
+        return res.json().catch(function () { return null; }).then(function (body) {
+          if (!res.ok) { var e = new Error('rpc'); e.code = body && body.message; throw e; }
+          return body;
+        });
+      }, function () { var e = new Error('red'); e.code = 'red'; throw e; });
+    }
+    return {
+      list: function () {
+        return rpc('list_bookings').then(function (rows) {
+          return (rows || []).map(function (r) {
+            return { id: r.id, name: r.name, start: new Date(r.start_at), end: new Date(r.end_at) };
+          });
+        });
+      },
+      create: function (b, pin) {
+        return rpc('create_booking', { p_name: b.name, p_start: b.start.toISOString(), p_end: b.end.toISOString(), p_pin: pin });
+      },
+      cancel: function (id, pin, admin) {
+        return rpc(admin ? 'admin_cancel_booking' : 'cancel_booking', { p_id: id, p_pin: pin });
+      }
+    };
+  }
+
+  function makeDemoApi() {
+    var nextId = 1;
+    var nextHour = new Date(); nextHour.setHours(nextHour.getHours() + 1, 0, 0, 0);
+    var data = [
+      { name: 'Marta', start: new Date(nextHour.getTime() + 2 * 3600000), end: new Date(nextHour.getTime() + 3.5 * 3600000) },
+      { name: 'Pablo', start: at(1, 10), end: at(1, 12) },
+      { name: 'Lucía', start: at(1, 18), end: at(1, 19, 30) },
+      { name: 'Dani', start: at(2, 22), end: at(3, 1) },
+      { name: 'Marta', start: at(3, 8), end: at(3, 9) },
+      { name: 'Asociación de vecinos', start: at(5, 17), end: at(5, 21) }
+    ].map(function (b) { b.id = nextId++; b.pin = '1234'; return b; });
+    var done = function (v) { return Promise.resolve(v); };
+    return {
+      list: function () { return done(data.map(function (b) { return { id: b.id, name: b.name, start: b.start, end: b.end }; })); },
+      create: function (b, pin) {
+        var clash = data.some(function (x) { return b.start < x.end && b.end > x.start; });
+        if (clash) { var e = new Error('solape'); e.code = 'solape'; return Promise.reject(e); }
+        data.push({ id: nextId++, name: b.name, start: b.start, end: b.end, pin: pin });
+        return done(nextId);
+      },
+      cancel: function (id, pin, admin) {
+        var b = data.filter(function (x) { return x.id === id; })[0];
+        if (!b) return done('no_existe');
+        if (pin !== b.pin && !(admin && pin === '0000')) return done('pin_incorrecto'); // PIN de prueba: solo modo maqueta
+        data = data.filter(function (x) { return x.id !== id; });
+        return done('ok');
+      }
+    };
+  }
+
+  var api = live ? makeLiveApi() : makeDemoApi();
+  var bookings = [];
 
   var $ = function (id) { return document.getElementById(id); };
   var el = {
@@ -33,8 +100,10 @@
     nombre: $('nombre'), iF: $('inicio-fecha'), iH: $('inicio-hora'),
     fF: $('fin-fecha'), fH: $('fin-hora'), pin: $('pin'),
     check: $('check'), error: $('form-error'), confirm: $('confirm'),
-    days: $('days'), agendaTitle: $('agenda-titulo')
+    days: $('days'), agendaTitle: $('agenda-titulo'), submit: document.querySelector('.btn-primary'),
+    foot: document.querySelector('.foot')
   };
+  if (live) el.foot.hidden = true;
 
   /* ---------- Formato ---------- */
   var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -45,6 +114,11 @@
   var toDateValue = function (d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); };
   var toTimeValue = function (d) { return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
 
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
   function relDay(d) {
     var diff = Math.round((startOfDay(d) - startOfDay(new Date())) / DAY);
     if (diff === 0) return 'hoy';
@@ -57,7 +131,7 @@
     return fmtDate(b.start) + ', ' + fmtTime(b.start) + ' → ' + (sameDay ? '' : fmtDate(b.end) + ', ') + fmtTime(b.end);
   }
 
-  /* ---------- Reglas ---------- */
+  /* ---------- Reglas (la base de datos es la que manda; aquí solo se avisa antes) ---------- */
   function parseInputs() {
     function p(dv, tv) {
       if (!dv || !tv) return null;
@@ -71,7 +145,7 @@
     if (!start || !end) return { ok: false, msg: '' };
     if (end <= start) return { ok: false, msg: 'La hora de fin tiene que ser posterior al inicio.' };
     var limit = new Date(); limit.setSeconds(0, 0);
-    if (start < limit) return { ok: false, msg: 'El inicio ya pasó. Elige una hora a partir de ahora.' };
+    if (start < limit) return { ok: false, msg: ERRORS.inicio_pasado };
     for (var i = 0; i < bookings.length; i++) {
       var b = bookings[i];
       if (start < b.end && end > b.start) {
@@ -115,20 +189,13 @@
   }
 
   /* ---------- Agenda ---------- */
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-    });
-  }
-
   function renderDays() {
     var t = new Date();
     var open = document.querySelector('.cancel-panel:not([hidden])');
     var openId = open ? open.getAttribute('data-for') : null;
     var html = '';
     for (var i = 0; i < 7; i++) {
-      var ds = at(i, 0), de = new Date(ds.getTime() + DAY);
-      ds = startOfDay(ds); de = new Date(ds); de.setDate(de.getDate() + 1);
+      var ds = at(i, 0), de = new Date(ds); de.setDate(de.getDate() + 1);
       var segs = bookings.filter(function (b) { return b.start < de && b.end > ds; })
         .sort(function (a, b) { return a.start - b.start; });
       var title = (i === 0 ? 'Hoy · ' : i === 1 ? 'Mañana · ' : '') + fmtDate(ds);
@@ -142,20 +209,22 @@
         : 'Libre todo el día';
 
       var list = segs.length ? segs.map(function (b) {
-        var startsBefore = b.start < ds, endsAfter = b.end > de;
-        var from = startsBefore ? 'desde ayer ' + fmtTime(b.start) : fmtTime(b.start);
-        var to = endsAfter ? 'hasta mañana ' + fmtTime(b.end) : fmtTime(b.end);
+        var from = b.start < ds ? 'desde ayer ' + fmtTime(b.start) : fmtTime(b.start);
+        var to = b.end > de ? 'hasta mañana ' + fmtTime(b.end) : fmtTime(b.end);
+        var pid = 'cp-' + b.id + '-' + i;
+        var isOpen = String(openId) === String(b.id);
         return '<li class="booking">' +
           '<div class="booking-row">' +
             '<div><p class="booking-who">' + escapeHtml(b.name) + '</p><p class="booking-when">' + from + ' → ' + to + '</p></div>' +
-            '<button type="button" class="btn-ghost" data-cancel="' + b.id + '" aria-expanded="' + (openId == b.id ? 'true' : 'false') + '" aria-controls="cp-' + b.id + '-' + i + '">Cancelar</button>' +
+            '<button type="button" class="btn-ghost" data-cancel="' + escapeHtml(b.id) + '" aria-expanded="' + isOpen + '" aria-controls="' + pid + '">Cancelar</button>' +
           '</div>' +
-          '<div class="cancel-panel" id="cp-' + b.id + '-' + i + '" data-for="' + b.id + '"' + (openId == b.id ? '' : ' hidden') + '>' +
+          '<div class="cancel-panel" id="' + pid + '" data-for="' + escapeHtml(b.id) + '"' + (isOpen ? '' : ' hidden') + '>' +
             '<div class="cancel-fields">' +
-              '<div class="field"><label for="cpin-' + b.id + '-' + i + '">PIN de la reserva o de administrador</label>' +
-              '<input id="cpin-' + b.id + '-' + i + '" type="password" inputmode="numeric" maxlength="4" autocomplete="off"></div>' +
-              '<button type="button" class="btn-danger" data-confirm="' + b.id + '">Cancelar reserva</button>' +
-              '<button type="button" class="btn-ghost" data-back="' + b.id + '">Volver</button>' +
+              '<div class="field"><label for="c' + pid + '" data-pin-label>PIN de la reserva</label>' +
+              '<input id="c' + pid + '" type="password" maxlength="64" autocomplete="off"></div>' +
+              '<label class="check-row"><input type="checkbox" data-admin> Soy administrador</label>' +
+              '<button type="button" class="btn-danger" data-confirm="' + escapeHtml(b.id) + '">Cancelar reserva</button>' +
+              '<button type="button" class="btn-ghost" data-back="' + escapeHtml(b.id) + '">Volver</button>' +
             '</div>' +
             '<p class="cancel-msg" role="alert"></p>' +
           '</div>' +
@@ -172,7 +241,20 @@
 
   function render() { renderStatus(); renderDays(); }
 
+  function reload() {
+    return api.list().then(function (list) { bookings = list; render(); liveCheck(); });
+  }
+
+  function announce(text) { el.confirm.hidden = false; el.confirm.textContent = text; }
+
   /* ---------- Cancelar ---------- */
+  el.days.addEventListener('change', function (e) {
+    if (!e.target.hasAttribute('data-admin')) return;
+    var panel = e.target.closest('.cancel-panel');
+    panel.querySelector('[data-pin-label]').textContent = e.target.checked ? 'PIN de administrador' : 'PIN de la reserva';
+    panel.querySelector('input[type="password"]').focus();
+  });
+
   el.days.addEventListener('click', function (e) {
     var btn = e.target.closest('button');
     if (!btn) return;
@@ -186,32 +268,41 @@
       if (willOpen) {
         panel.removeAttribute('hidden');
         btn.setAttribute('aria-expanded', 'true');
-        panel.querySelector('input').focus();
+        panel.querySelector('input[type="password"]').focus();
       }
     } else if (btn.hasAttribute('data-back')) {
-      var p2 = li.querySelector('.cancel-panel');
-      p2.setAttribute('hidden', '');
+      li.querySelector('.cancel-panel').setAttribute('hidden', '');
       li.querySelector('[data-cancel]').setAttribute('aria-expanded', 'false');
       li.querySelector('[data-cancel]').focus();
     } else if (btn.hasAttribute('data-confirm')) {
-      var id = Number(btn.getAttribute('data-confirm'));
-      var b = bookings.filter(function (x) { return x.id === id; })[0];
-      var input = li.querySelector('.cancel-panel input');
+      var rawId = btn.getAttribute('data-confirm');
+      var b = bookings.filter(function (x) { return String(x.id) === rawId; })[0];
+      var id = b ? b.id : rawId;
+      var input = li.querySelector('.cancel-panel input[type="password"]');
+      var isAdmin = li.querySelector('[data-admin]').checked;
       var msg = li.querySelector('.cancel-msg');
-      if (!/^\d{4}$/.test(input.value)) { msg.textContent = 'Escribe un PIN de 4 cifras.'; input.focus(); return; }
-      if (input.value !== b.pin && input.value !== DEMO_ADMIN_PIN) { msg.textContent = 'PIN incorrecto. No se ha cancelado la reserva.'; input.select(); return; }
-      bookings = bookings.filter(function (x) { return x.id !== id; });
-      render();
-      liveCheck();
-      el.agendaTitle.focus();
-      announce('Reserva de ' + b.name + ' cancelada.');
+      if (!isAdmin && !/^\d{4}$/.test(input.value)) { msg.textContent = 'Escribe un PIN de 4 cifras.'; input.focus(); return; }
+      if (isAdmin && !input.value) { msg.textContent = 'Escribe el PIN de administrador.'; input.focus(); return; }
+      btn.disabled = true;
+      msg.textContent = '';
+      api.cancel(id, input.value, isAdmin).then(function (result) {
+        if (result === 'ok') {
+          return reload().then(function () {
+            el.agendaTitle.focus();
+            announce('Reserva de ' + (b ? b.name : '') + ' cancelada.');
+          });
+        }
+        btn.disabled = false;
+        if (result === 'bloqueado') msg.textContent = 'Demasiados intentos fallidos. Inténtalo de nuevo en 15 minutos.';
+        else if (result === 'no_existe') { msg.textContent = 'Esa reserva ya no existe.'; reload(); }
+        else if (result === 'sin_admin') msg.textContent = 'El administrador todavía no está configurado.';
+        else { msg.textContent = 'PIN incorrecto. No se ha cancelado la reserva.'; input.select(); }
+      }, function (err) {
+        btn.disabled = false;
+        msg.textContent = ERRORS[err && err.code] || GENERIC_ERROR;
+      });
     }
   });
-
-  function announce(text) {
-    el.confirm.hidden = false;
-    el.confirm.textContent = text;
-  }
 
   /* ---------- Reservar ---------- */
   function setDefaults() {
@@ -247,16 +338,27 @@
     if (!r.ok) return showError(r.msg, el.iF);
     if (!/^\d{4}$/.test(el.pin.value)) return showError('El PIN tiene que tener 4 cifras.', el.pin);
 
-    var booking = { id: nextId++, name: name, pin: el.pin.value, start: v.start, end: v.end };
-    bookings.push(booking);
-    el.pin.value = '';
-    setDefaults();
-    render();
-    liveCheck();
-    el.confirm.hidden = false;
-    el.confirm.innerHTML = '<strong>Reservada a nombre de ' + escapeHtml(name) + '.</strong> ' + escapeHtml(fullLabel(booking)) +
-      '. Apunta tu PIN: lo necesitarás para cancelar.';
-    el.confirm.focus();
+    var booking = { name: name, start: v.start, end: v.end };
+    var label = el.submit.textContent;
+    el.submit.disabled = true;
+    el.submit.textContent = 'Reservando…';
+    api.create(booking, el.pin.value).then(function () {
+      el.pin.value = '';
+      setDefaults();
+      return reload().then(function () {
+        el.confirm.hidden = false;
+        el.confirm.innerHTML = '<strong>Reservada a nombre de ' + escapeHtml(name) + '.</strong> ' + escapeHtml(fullLabel(booking)) +
+          '. Apunta tu PIN: lo necesitarás para cancelar.';
+        el.confirm.focus();
+      });
+    }).catch(function (err) {
+      var code = err && err.code;
+      showError(ERRORS[code] || GENERIC_ERROR, code === 'solape' ? el.iF : null);
+      if (code === 'solape') reload().catch(function () {});
+    }).then(function () {
+      el.submit.disabled = false;
+      el.submit.textContent = label;
+    });
   });
 
   [el.iF, el.iH, el.fF, el.fH].forEach(function (i) {
@@ -265,8 +367,20 @@
   [el.nombre, el.pin].forEach(function (i) { i.addEventListener('input', clearError); });
   el.pin.addEventListener('input', function () { el.pin.value = el.pin.value.replace(/\D/g, '').slice(0, 4); });
 
+  /* ---------- Arranque ---------- */
   setDefaults();
-  render();
-  liveCheck();
-  setInterval(function () { renderStatus(); }, 30000);
+  el.word.textContent = 'Cargando';
+  el.detail.textContent = live ? 'Consultando las reservas…' : '';
+  reload().catch(function (err) {
+    el.word.textContent = 'Sin conexión';
+    el.detail.textContent = ERRORS[err && err.code] || GENERIC_ERROR;
+  });
+
+  // Refresco cada 30 s para ver las reservas de otros vecinos (no mientras se escribe un PIN de cancelación).
+  setInterval(function () {
+    if (document.hidden) return;
+    var typing = document.querySelector('.cancel-panel:not([hidden])');
+    if (typing) { renderStatus(); return; }
+    reload().catch(function () {});
+  }, 30000);
 })();
