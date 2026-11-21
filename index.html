@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reserva de sala</title>
+  <meta name="description" content="Reserva la sala del gimnasio comunitario. Mira cuándo está libre, reserva con tu nombre y cancela con tu PIN.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0a0a0b">
+  <link rel="preload" href="assets/fonts/anybody-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip" href="#reservar">Ir al formulario de reserva</a>
+
+  <header class="top">
+    <p class="brand">Sala comunitaria</p>
+    <a class="top-cta" href="#reservar">Reservar</a>
+  </header>
+
+  <main>
+    <section class="status" aria-labelledby="estado-titulo">
+      <h1 id="estado-titulo" class="status-word" data-state="libre">Libre</h1>
+      <p id="estado-detalle" class="status-detail"></p>
+    </section>
+
+    <div class="work">
+      <section class="reserve" id="reservar" aria-labelledby="reservar-titulo">
+        <h2 id="reservar-titulo">Reservar la sala</h2>
+
+        <form id="form" novalidate>
+          <div class="field">
+            <label for="nombre">Nombre</label>
+            <input id="nombre" name="nombre" type="text" autocomplete="given-name" maxlength="40" required aria-describedby="form-error">
+          </div>
+
+          <fieldset class="when">
+            <legend>Desde</legend>
+            <div class="pair">
+              <div class="field">
+                <label for="inicio-fecha">Fecha</label>
+                <input id="inicio-fecha" type="date" required>
+              </div>
+              <div class="field">
+                <label for="inicio-hora">Hora</label>
+                <input id="inicio-hora" type="time" required>
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset class="when">
+            <legend>Hasta</legend>
+            <div class="pair">
+              <div class="field">
+                <label for="fin-fecha">Fecha</label>
+                <input id="fin-fecha" type="date" required>
+              </div>
+              <div class="field">
+                <label for="fin-hora">Hora</label>
+                <input id="fin-hora" type="time" required>
+              </div>
+            </div>
+          </fieldset>
+
+          <div class="field">
+            <label for="pin">PIN de 4 cifras</label>
+            <input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off" required aria-describedby="pin-ayuda">
+            <p id="pin-ayuda" class="hint">Lo necesitarás para cancelar. No lo compartas.</p>
+          </div>
+
+          <p id="check" class="check" role="status"></p>
+          <p id="form-error" class="form-error" role="alert" hidden></p>
+
+          <button class="btn-primary" type="submit">Reservar</button>
+        </form>
+
+        <p id="confirm" class="confirm" role="status" tabindex="-1" hidden></p>
+      </section>
+
+      <section class="agenda" aria-labelledby="agenda-titulo">
+        <h2 id="agenda-titulo" tabindex="-1">Próximos 7 días</h2>
+        <div id="days"></div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="foot">
+    <p>Maqueta con datos de ejemplo: las reservas no se guardan. PIN de prueba de las reservas: 1234. PIN de administrador de prueba: 0000.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
