@@ -398,6 +398,24 @@ input::-webkit-calendar-picker-indicator { opacity: 0.7; cursor: pointer; }
 }
 .cancel-fields .field { grid-column: 1 / -1; }
 .cancel-fields .field input { max-width: 14rem; letter-spacing: 0.3em; }
+.check-row {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  min-height: 44px;
+  color: var(--text);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+input[type="checkbox"] {
+  width: 22px;
+  min-height: 22px;
+  height: 22px;
+  padding: 0;
+  accent-color: var(--red);
+  cursor: pointer;
+}
 .cancel-fields > button:nth-of-type(1) { grid-column: 1; justify-self: start; }
 .cancel-fields > button:nth-of-type(2) { grid-column: 2; }
 .cancel-msg { font-size: 0.9375rem; font-weight: 500; color: var(--red-text); min-height: 1.4em; }
